@@ -11,7 +11,7 @@ data IcmpPacket =
 	deriving Eq
 
 echoRequest :: Word16 -> Word16 -> BL.ByteString -> String
-echoRequest id seq payload = unpack $ addChecksum $ runPut $ icmpToStr icmp
+echoRequest id seq payload = unpack $ addIcmpChecksum $ runPut $ icmpToStr icmp
 	where
 	icmp = IcmpPacket 8 0 0 id seq payload
 	icmpToStr :: IcmpPacket -> Put
@@ -24,12 +24,12 @@ echoRequest id seq payload = unpack $ addChecksum $ runPut $ icmpToStr icmp
 		putLazyByteString p
 
 -- calculate and insert checksum
-addChecksum :: BL.ByteString -> BL.ByteString
-addChecksum a = BL.append start $ BL.append sum end
+addIcmpChecksum :: BL.ByteString -> BL.ByteString
+addIcmpChecksum a = BL.append start $ BL.append sum end
 	where 	
 	start = BL.take 2 a
 	end = BL.drop 4 a
-	sum = BL.pack [fromIntegral $ shiftR csum 8, fromIntegral $ csum .&. 0xFF]
+	sum = BL.pack $ map fromIntegral [shiftR csum 8, csum .&. 0xFF]
 	csum = calcSum a
 
 calcSum :: BL.ByteString -> Int
