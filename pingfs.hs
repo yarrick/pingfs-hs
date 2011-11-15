@@ -4,11 +4,16 @@ import Data.Bits
 import Data.ByteString.Lazy.Char8 (unpack, pack)
 import qualified Data.ByteString.Lazy as BL
 import Data.Binary.Put
+import Data.Binary.Get
 
 data IcmpPacket =
    	IcmpPacket { icmpType :: Word8, code :: Word8, chksum :: Word16, 
    	id :: Word16, seqNo :: Word16, payload :: BL.ByteString }
 	deriving Eq
+
+data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber, 
+	source :: HostAddress, dest :: HostAddress, upperData :: BL.ByteString }
+	deriving (Eq, Show)
 
 echoRequest :: Word16 -> Word16 -> BL.ByteString -> String
 echoRequest id seq payload = unpack $ addIcmpChecksum $ runPut $ icmpToStr icmp
@@ -22,6 +27,29 @@ echoRequest id seq payload = unpack $ addIcmpChecksum $ runPut $ icmpToStr icmp
 		putWord16be i
 		putWord16be s
 		putLazyByteString p
+
+nibbles :: Word8 -> (Int, Int)
+nibbles a = (shiftR i 4, i .&. 0x0F)
+	where i = fromIntegral a
+
+parseIP :: String -> IpPacket
+parseIP b = parseIPV4 $ pack b
+
+parseIPV4 :: BL.ByteString -> IpPacket
+parseIPV4 pkt = IpPacket ver p s d upper
+	where 
+	(ver, len) = nibbles $ BL.head pkt
+	hdrlen = fromIntegral $ 4 * len
+	upper = BL.drop hdrlen pkt
+	(p,s,d) = runGet parseHdr $ BL.take hdrlen pkt
+	parseHdr :: Get (ProtocolNumber, HostAddress, HostAddress)
+	parseHdr = do
+		skip 9
+		proto <- getWord8
+		skip 2
+		src <- getWord32be
+		dst <- getWord32be
+		return (fromIntegral proto, src, dst)
 
 -- calculate and insert checksum
 addIcmpChecksum :: BL.ByteString -> BL.ByteString
@@ -52,8 +80,9 @@ main = do
 	len <- sendTo sock pkt addr
 	putStrLn $ "send " ++ show len
 	(buf,len,addr) <- recvFrom sock 1024
-	putStrLn $ "got " ++ show len ++ ":"
-	putStrLn $ show $ pack buf
+	let inpkt = parseIP buf
+	putStrLn $ "got " ++ show len
+	putStrLn $ show $ inpkt
 		where 
 		pkt = echoRequest 12 19 $ BL.pack [0xFF, 0xFF, 0xF0, 0x0F, 0xFF, 0xFF]
 		addr = SockAddrInet 0 0x0104040A
