@@ -6,9 +6,9 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Binary.Put
 import Data.Binary.Get
 
-data IcmpPacket =
-   	IcmpPacket { icmpType :: Word8, code :: Word8, chksum :: Word16, 
-   	id :: Word16, seqNo :: Word16, payload :: BL.ByteString }
+data IcmpPacket = IcmpPacket { icmpType :: Word8, code :: Word8, 
+	chksum :: Word16, chksumGood :: Bool, 
+	id :: Word16, seqNo :: Word16, payload :: BL.ByteString }
 	deriving Eq
 
 data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber, 
@@ -16,21 +16,22 @@ data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber,
 	deriving (Eq, Show)
 
 echoRequest :: Word16 -> Word16 -> BL.ByteString -> IcmpPacket
-echoRequest id seq payload = IcmpPacket 8 0 0 id seq payload
+echoRequest id seq payload = IcmpPacket 8 0 0 True id seq payload
 
 icmpTypeName :: Word8 -> String
 icmpTypeName 8 = "Ping"
 icmpTypeName 0 = "Pong"
 
 icmpStr :: IcmpPacket -> String
-icmpStr (IcmpPacket t c cs i s p) = icmpTypeName t ++ " id " ++ show i 
-	++ " seq " ++ show s ++ " data " ++ show p
+icmpStr (IcmpPacket t c cs cg i s p) = icmpTypeName t ++ " crc " ++
+	show cs ++ " ok? " ++ show cg ++ " id " ++ show i ++ 
+	" seq " ++ show s ++ " data " ++ show p
 
 encodeICMP :: IcmpPacket -> String
 encodeICMP pkt = unpack $ addIcmpChecksum $ runPut $ encode pkt
 	where
 	encode :: IcmpPacket -> Put
-	encode (IcmpPacket t c cs i s p) = do
+	encode (IcmpPacket t c cs cg i s p) = do
 		putWord8 t
 		putWord8 c
 		putWord16be cs
@@ -38,10 +39,14 @@ encodeICMP pkt = unpack $ addIcmpChecksum $ runPut $ encode pkt
 		putWord16be s
 		putLazyByteString p
 
+icmpChecksumOk :: BL.ByteString -> Bool
+icmpChecksumOk i = calcSum i == 0
+
 decodeICMP :: IpPacket -> IcmpPacket
-decodeICMP (IpPacket 4 ipproto_icmp _ _ d) = IcmpPacket t c cs i s p
+decodeICMP (IpPacket 4 ipproto_icmp _ _ d) = IcmpPacket t c cs cg i s p
 	where 
 	(t,c,cs,i,s,p) = runGet parseICMP d
+	cg = icmpChecksumOk d
 	parseICMP :: Get (Word8, Word8, Word16, Word16, Word16, BL.ByteString)
 	parseICMP = do
 		typ <- getWord8
@@ -106,7 +111,7 @@ main = do
 	(buf,len,addr) <- recvFrom sock 1024
 	let inpkt = parseIP buf
 	let inicmp = decodeICMP inpkt
-	putStrLn $ "got " ++ icmpStr inicmp
+	putStrLn $ "got  " ++ icmpStr inicmp
 		where 
 		pkt = echoRequest 12 19 $ BL.pack [0xFF, 0xFF, 0xF0, 0x0F, 0xFF, 0xFF]
 		addr = SockAddrInet 0 0x0104040A -- reversed because of big endian
