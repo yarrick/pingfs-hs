@@ -15,18 +15,42 @@ data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber,
 	source :: HostAddress, dest :: HostAddress, upperData :: BL.ByteString }
 	deriving (Eq, Show)
 
-echoRequest :: Word16 -> Word16 -> BL.ByteString -> String
-echoRequest id seq payload = unpack $ addIcmpChecksum $ runPut $ icmpToStr icmp
+echoRequest :: Word16 -> Word16 -> BL.ByteString -> IcmpPacket
+echoRequest id seq payload = IcmpPacket 8 0 0 id seq payload
+
+icmpTypeName :: Word8 -> String
+icmpTypeName 8 = "Ping"
+icmpTypeName 0 = "Pong"
+
+icmpStr :: IcmpPacket -> String
+icmpStr (IcmpPacket t c cs i s p) = icmpTypeName t ++ " id " ++ show i 
+	++ " seq " ++ show s ++ " data " ++ show p
+
+encodeICMP :: IcmpPacket -> String
+encodeICMP pkt = unpack $ addIcmpChecksum $ runPut $ encode pkt
 	where
-	icmp = IcmpPacket 8 0 0 id seq payload
-	icmpToStr :: IcmpPacket -> Put
-	icmpToStr (IcmpPacket t c cs i s p) = do
+	encode :: IcmpPacket -> Put
+	encode (IcmpPacket t c cs i s p) = do
 		putWord8 t
 		putWord8 c
 		putWord16be cs
 		putWord16be i
 		putWord16be s
 		putLazyByteString p
+
+decodeICMP :: IpPacket -> IcmpPacket
+decodeICMP (IpPacket 4 ipproto_icmp _ _ d) = IcmpPacket t c cs i s p
+	where 
+	(t,c,cs,i,s,p) = runGet parseICMP d
+	parseICMP :: Get (Word8, Word8, Word16, Word16, Word16, BL.ByteString)
+	parseICMP = do
+		typ <- getWord8
+		code <- getWord8
+		csum <- getWord16be
+		id <- getWord16be
+		seq <- getWord16be
+		buf <- getRemainingLazyByteString
+		return (typ, code, csum, id, seq, buf)
 
 nibbles :: Word8 -> (Int, Int)
 nibbles a = (shiftR i 4, i .&. 0x0F)
@@ -77,14 +101,14 @@ ipproto_icmp = 1
 main :: IO ()
 main = do
 	sock <- socket AF_INET Raw ipproto_icmp
-	len <- sendTo sock pkt addr
-	putStrLn $ "send " ++ show len
+	len <- sendTo sock (encodeICMP pkt) addr
+	putStrLn $ "send " ++ icmpStr pkt
 	(buf,len,addr) <- recvFrom sock 1024
 	let inpkt = parseIP buf
-	putStrLn $ "got " ++ show len
-	putStrLn $ show $ inpkt
+	let inicmp = decodeICMP inpkt
+	putStrLn $ "got " ++ icmpStr inicmp
 		where 
 		pkt = echoRequest 12 19 $ BL.pack [0xFF, 0xFF, 0xF0, 0x0F, 0xFF, 0xFF]
-		addr = SockAddrInet 0 0x0104040A
+		addr = SockAddrInet 0 0x0104040A -- reversed because of big endian
 
 
