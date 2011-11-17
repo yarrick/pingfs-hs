@@ -28,16 +28,15 @@ createIcmpSender c = do
 
 runIcmpThread :: IcmpSender -> IO ()
 runIcmpThread (IcmpSender chan sock) = do
-	sock <- socket AF_INET Raw 1
 	listenSock chan sock
-
-listenSock :: Chan EchoReply -> Socket -> IO ()
-listenSock chan sock = do
-	(str,len,addr) <- recvFrom sock 2048
-	let inpkt = parseIP str
-	let inicmp = decodeICMP inpkt
-	writeChan chan $ EchoReply $ icmpStr inicmp
-	listenSock chan sock
+	where
+	listenSock :: Chan EchoReply -> Socket -> IO ()
+	listenSock chan sock = do
+		(str,len,addr) <- recvFrom sock 2048
+		let inpkt = parseIP str -- todo parse and return Maybe EchoReply
+		let inicmp = decodeICMP inpkt
+		writeChan chan $ EchoReply $ icmpStr inicmp
+		listenSock chan sock
 
 data IcmpPacket = IcmpPacket { icmpType :: Word8, code :: Word8, 
 	chksum :: Word16, chksumGood :: Bool, 
