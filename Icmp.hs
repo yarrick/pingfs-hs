@@ -1,4 +1,4 @@
-module Icmp (createIcmpSender, runIcmpThread, IcmpSender, echoRequest, EchoReply, showReply) where
+module Icmp (createIcmpSender, IcmpSender, runIcmpThread, echoRequest, EchoReply) where
 import Control.Concurrent.Chan
 import Network.Socket
 import Data.Word
@@ -8,21 +8,18 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Binary.Put
 import Data.Binary.Get
 
+-- State for sender
 data IcmpSender = IcmpSender {
-	chan :: Chan EchoReply,
-	sock :: Socket
-}
-
-data EchoRequest = EchoRequest {
-	dstaddr :: SockAddr
+	chan :: Chan EchoReply, -- channel to send replies
+	sock :: Socket -- ICMP raw socket
 }
 
 data EchoReply = EchoReply {
 	reply :: String
-}
+} deriving Eq
 
-showReply :: EchoReply -> String
-showReply (EchoReply a) = a
+instance Show EchoReply where
+	show (EchoReply a) = a
 
 createIcmpSender :: Chan EchoReply -> IO IcmpSender
 createIcmpSender c = do

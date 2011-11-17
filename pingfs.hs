@@ -8,7 +8,7 @@ import Icmp
 printer :: Chan EchoReply -> IO ()
 printer chan = do
 	a <- readChan chan
-	putStrLn $ showReply a
+	putStrLn $ show a
 	printer chan
 
 reader :: IcmpSender -> IO ()
