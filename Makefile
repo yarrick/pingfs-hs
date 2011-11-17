@@ -3,7 +3,7 @@
 
 all: pingfs
 
-pingfs: pingfs.hs
+pingfs: pingfs.hs Icmp.hs
 	ghc --make pingfs.hs -O2 -o $@
 
 run: pingfs
