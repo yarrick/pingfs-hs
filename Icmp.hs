@@ -22,7 +22,7 @@ instance Show EchoReply where
 	show (EchoReply a) = a
 
 createIcmpSender :: Chan EchoReply -> IO IcmpSender
-createIcmpSender c = do
+createIcmpSender c = withSocketsDo $ do
 	sock <- socket AF_INET Raw 1
 	return (IcmpSender c sock)
 
