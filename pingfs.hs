@@ -34,8 +34,7 @@ getHost x = do
 parseHosts :: String -> IO [SockAddr]
 parseHosts file = do
 	l <- readFile file
-	hosts <- mapM getHost (lines l)
-	return hosts
+	mapM getHost (lines l)
 
 checkArgs :: [String] -> IO ()
 checkArgs [] = do
@@ -47,8 +46,7 @@ parseArgs :: IO [SockAddr]
 parseArgs = do
 	args <- getArgs
 	checkArgs args
-	hosts <- parseHosts $ head args
-	return hosts
+	parseHosts $ head args
 
 checkHostCount :: [SockAddr] -> IO ()
 checkHostCount [] = do
