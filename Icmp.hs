@@ -30,6 +30,7 @@ icmpTypeName :: IcmpPacket -> String
 icmpTypeName a 
 	| icmpType a == 8 = "Ping to"
 	| icmpType a == 0 = "Pong from"
+	| otherwise = "Junk (" ++ show (icmpType a) ++ ") from"
 
 instance Show EchoReply where
 	show (EchoReply i) = icmpTypeName i ++ 
