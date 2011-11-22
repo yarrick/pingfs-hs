@@ -15,6 +15,7 @@ data IcmpSender = IcmpSender {
 }
 
 data IcmpPacket = IcmpPacket { 
+	icmpPeer :: SockAddr,
 	icmpType :: Word8, 
 	icmpCode :: Word8, 
 	icmpCrc :: Word16,
@@ -27,11 +28,12 @@ data EchoReply = EchoReply IcmpPacket
 
 icmpTypeName :: IcmpPacket -> String
 icmpTypeName a 
-	| icmpType a == 8 = "Ping"
-	| icmpType a == 0 = "Pong"
+	| icmpType a == 8 = "Ping to"
+	| icmpType a == 0 = "Pong from"
 
 instance Show EchoReply where
 	show (EchoReply i) = icmpTypeName i ++ 
+		" peer " ++ show (icmpPeer i) ++
 		" id " ++ show (icmpId i) ++
 		" seq " ++ show (icmpSeqNo i) ++ 
 		" data " ++ show (icmpPayload i)
@@ -41,6 +43,13 @@ createIcmpSender c = withSocketsDo $ do
 	sock <- socket AF_INET Raw 1
 	return (IcmpSender c sock)
 
+-- Check if parsing went ok, and then verify ICMP checksum
+sendPacket :: Maybe IcmpPacket -> Chan EchoReply -> BL.ByteString -> IO ()
+sendPacket Nothing _  _= return ()
+sendPacket (Just i) c p
+	| icmpChecksumOk p = do writeChan c $ EchoReply i
+	| otherwise = return ()
+
 runIcmpThread :: IcmpSender -> IO ()
 runIcmpThread (IcmpSender chan sock) = do
 	listenSock chan sock
@@ -49,12 +58,9 @@ runIcmpThread (IcmpSender chan sock) = do
 	listenSock chan sock = do
 		(str,len,addr) <- recvFrom sock 2048
 		let inpkt = parseIP str
-		let inicmp = decodeICMP inpkt
-		case inicmp of
-			Nothing -> do listenSock chan sock
-			Just i  -> do
-				writeChan chan $ EchoReply i
-				listenSock chan sock
+		let inicmp = decodeICMP inpkt addr
+		sendPacket inicmp chan (upperData inpkt)
+		listenSock chan sock
 
 
 data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber, 
@@ -63,14 +69,14 @@ data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber,
 
 echoRequest :: IcmpSender -> SockAddr -> Word16 -> Word16 -> BL.ByteString -> IO Int
 echoRequest (IcmpSender _ sock) addr id seq payload = do 
-	let p = IcmpPacket 8 0 0 id seq payload
+	let p = IcmpPacket addr 8 0 0 id seq payload
 	sendTo sock (encodeICMP p) addr
 
 encodeICMP :: IcmpPacket -> String
 encodeICMP pkt = unpack $ addIcmpChecksum $ runPut $ encode pkt
 	where
 	encode :: IcmpPacket -> Put
-	encode (IcmpPacket t c cs i s p) = do
+	encode (IcmpPacket a t c cs i s p) = do
 		putWord8 t
 		putWord8 c
 		putWord16be cs
@@ -81,8 +87,8 @@ encodeICMP pkt = unpack $ addIcmpChecksum $ runPut $ encode pkt
 icmpChecksumOk :: BL.ByteString -> Bool
 icmpChecksumOk i = calcSum i == 0
 
-decodeICMP :: IpPacket -> Maybe IcmpPacket
-decodeICMP (IpPacket 4 ipproto_icmp _ _ d) = Just $ IcmpPacket t c cs i s p
+decodeICMP :: IpPacket -> SockAddr -> Maybe IcmpPacket
+decodeICMP (IpPacket 4 ipproto_icmp _ _ d) addr = Just $ IcmpPacket addr t c cs i s p
 	where 
 	(t,c,cs,i,s,p) = runGet parseICMP d
 	parseICMP :: Get (Word8, Word8, Word16, Word16, Word16, BL.ByteString)
@@ -94,7 +100,7 @@ decodeICMP (IpPacket 4 ipproto_icmp _ _ d) = Just $ IcmpPacket t c cs i s p
 		seq <- getWord16be
 		buf <- getRemainingLazyByteString
 		return (typ, code, csum, id, seq, buf)
-decodeICMP (IpPacket _ _ _ _ _) = Nothing
+decodeICMP ip addr = Nothing
 
 nibbles :: Word8 -> (Int, Int)
 nibbles a = (shiftR i 4, i .&. 0x0F)
