@@ -1,4 +1,4 @@
-module Icmp (createIcmpSender, IcmpSender, runIcmpThread, echoRequest, EchoReply) where
+module Icmp (createIcmpSender, IcmpSender, runIcmpThread, echoRequest, EchoReply, IcmpPacket) where
 import Control.Concurrent.Chan
 import Network.Socket
 import Data.Word
@@ -18,7 +18,6 @@ data IcmpPacket = IcmpPacket {
 	icmpPeer :: SockAddr,
 	icmpType :: Word8, 
 	icmpCode :: Word8, 
-	icmpCrc :: Word16,
 	icmpId :: Word16, 
 	icmpSeqNo :: Word16, 
 	icmpPayload :: BL.ByteString }
@@ -45,9 +44,9 @@ createIcmpSender c = withSocketsDo $ do
 	return (IcmpSender c sock)
 
 -- Forward EchoReply if parsing went fine
-sendPacket :: Maybe IcmpPacket -> Chan EchoReply -> BL.ByteString -> IO ()
-sendPacket Nothing _  _= return ()
-sendPacket (Just i) c p = writeChan c $ EchoReply i
+sendPacket :: Maybe IcmpPacket -> Chan EchoReply -> IO ()
+sendPacket Nothing _ = return ()
+sendPacket (Just i) c = writeChan c $ EchoReply i
 
 runIcmpThread :: IcmpSender -> IO ()
 runIcmpThread (IcmpSender chan sock) = do
@@ -58,7 +57,7 @@ runIcmpThread (IcmpSender chan sock) = do
 		(str,len,addr) <- recvFrom sock 2048
 		let inpkt = parseIP str
 		let inicmp = decodeICMP inpkt addr
-		sendPacket inicmp chan (upperData inpkt)
+		sendPacket inicmp chan
 		listenSock chan sock
 
 
@@ -68,17 +67,17 @@ data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber,
 
 echoRequest :: IcmpSender -> SockAddr -> Word16 -> Word16 -> BL.ByteString -> IO Int
 echoRequest (IcmpSender _ sock) addr id seq payload = do 
-	let p = IcmpPacket addr 8 0 0 id seq payload
+	let p = IcmpPacket addr 8 0 id seq payload
 	sendTo sock (encodeICMP p) addr
 
 encodeICMP :: IcmpPacket -> String
 encodeICMP pkt = unpack $ addIcmpChecksum $ runPut $ encode pkt
 	where
 	encode :: IcmpPacket -> Put
-	encode (IcmpPacket a t c cs i s p) = do
+	encode (IcmpPacket a t c i s p) = do
 		putWord8 t
 		putWord8 c
-		putWord16be cs
+		putWord16be 0 -- checksum will be added later
 		putWord16be i
 		putWord16be s
 		putLazyByteString p
@@ -89,21 +88,21 @@ icmpChecksumOk i = calcSum i == 0
 decodeICMP :: IpPacket -> SockAddr -> Maybe IcmpPacket
 decodeICMP ip addr 
 	| ipv4icmp ip = case icmpChecksumOk (upperData ip) of
-		True -> Just $ IcmpPacket addr t c cs i s p
+		True -> Just $ IcmpPacket addr t c i s p
 		False -> Nothing
 	| otherwise = Nothing
 	where 
 	ipv4icmp pkt = (version pkt == 4) && (proto pkt == ipproto_icmp)
-	(t,c,cs,i,s,p) = runGet parseICMP (upperData ip)
-	parseICMP :: Get (Word8, Word8, Word16, Word16, Word16, BL.ByteString)
+	(t,c,i,s,p) = runGet parseICMP (upperData ip)
+	parseICMP :: Get (Word8, Word8, Word16, Word16, BL.ByteString)
 	parseICMP = do
 		typ <- getWord8
 		code <- getWord8
-		csum <- getWord16be
+		skip 2 -- checksum is verified above
 		id <- getWord16be
 		seq <- getWord16be
 		buf <- getRemainingLazyByteString
-		return (typ, code, csum, id, seq, buf)
+		return (typ, code, id, seq, buf)
 
 nibbles :: Word8 -> (Int, Int)
 nibbles a = (shiftR i 4, i .&. 0x0F)
