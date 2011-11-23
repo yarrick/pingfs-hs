@@ -44,12 +44,10 @@ createIcmpSender c = withSocketsDo $ do
 	sock <- socket AF_INET Raw 1
 	return (IcmpSender c sock)
 
--- Check if parsing went ok, and then verify ICMP checksum
+-- Forward EchoReply if parsing went fine
 sendPacket :: Maybe IcmpPacket -> Chan EchoReply -> BL.ByteString -> IO ()
 sendPacket Nothing _  _= return ()
-sendPacket (Just i) c p
-	| icmpChecksumOk p = do writeChan c $ EchoReply i
-	| otherwise = return ()
+sendPacket (Just i) c p = writeChan c $ EchoReply i
 
 runIcmpThread :: IcmpSender -> IO ()
 runIcmpThread (IcmpSender chan sock) = do
@@ -89,9 +87,14 @@ icmpChecksumOk :: BL.ByteString -> Bool
 icmpChecksumOk i = calcSum i == 0
 
 decodeICMP :: IpPacket -> SockAddr -> Maybe IcmpPacket
-decodeICMP (IpPacket 4 ipproto_icmp _ _ d) addr = Just $ IcmpPacket addr t c cs i s p
+decodeICMP ip addr 
+	| ipv4icmp ip = case icmpChecksumOk (upperData ip) of
+		True -> Just $ IcmpPacket addr t c cs i s p
+		False -> Nothing
+	| otherwise = Nothing
 	where 
-	(t,c,cs,i,s,p) = runGet parseICMP d
+	ipv4icmp pkt = (version pkt == 4) && (proto pkt == ipproto_icmp)
+	(t,c,cs,i,s,p) = runGet parseICMP (upperData ip)
 	parseICMP :: Get (Word8, Word8, Word16, Word16, Word16, BL.ByteString)
 	parseICMP = do
 		typ <- getWord8
@@ -101,7 +104,6 @@ decodeICMP (IpPacket 4 ipproto_icmp _ _ d) addr = Just $ IcmpPacket addr t c cs 
 		seq <- getWord16be
 		buf <- getRemainingLazyByteString
 		return (typ, code, csum, id, seq, buf)
-decodeICMP ip addr = Nothing
 
 nibbles :: Word8 -> (Int, Int)
 nibbles a = (shiftR i 4, i .&. 0x0F)
