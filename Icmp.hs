@@ -1,4 +1,4 @@
-module Icmp (createIcmpSender, IcmpSender, runIcmpThread, echoRequest, EchoReply, IcmpPacket) where
+module Icmp (openIcmpSocket, IcmpPacket, readIcmp, echoRequest) where
 import Control.Concurrent.Chan
 import Network.Socket
 import Data.Word
@@ -7,12 +7,6 @@ import Data.ByteString.Lazy.Char8 (unpack, pack)
 import qualified Data.ByteString.Lazy as BL
 import Data.Binary.Put
 import Data.Binary.Get
-
--- State for sender
-data IcmpSender = IcmpSender {
-	chan :: Chan EchoReply, -- channel to send replies
-	sock :: Socket -- ICMP raw socket
-}
 
 data IcmpPacket = IcmpPacket { 
 	icmpPeer :: SockAddr,
@@ -23,52 +17,37 @@ data IcmpPacket = IcmpPacket {
 	icmpPayload :: BL.ByteString }
 	deriving Eq
 
-data EchoReply = EchoReply IcmpPacket
-
 icmpTypeName :: IcmpPacket -> String
 icmpTypeName a 
 	| icmpType a == 8 = "Ping to"
 	| icmpType a == 0 = "Pong from"
 	| otherwise = "Junk (" ++ show (icmpType a) ++ ") from"
 
-instance Show EchoReply where
-	show (EchoReply i) = icmpTypeName i ++ 
+instance Show IcmpPacket where
+	show i = icmpTypeName i ++ 
 		" peer " ++ show (icmpPeer i) ++
 		" id " ++ show (icmpId i) ++
 		" seq " ++ show (icmpSeqNo i) ++ 
 		" data " ++ show (icmpPayload i)
 
-createIcmpSender :: Chan EchoReply -> IO IcmpSender
-createIcmpSender c = withSocketsDo $ do
-	sock <- socket AF_INET Raw 1
-	return (IcmpSender c sock)
+openIcmpSocket :: IO Socket
+openIcmpSocket = socket AF_INET Raw ipproto_icmp
 
--- Forward EchoReply if parsing went fine
-sendPacket :: Maybe IcmpPacket -> Chan EchoReply -> IO ()
-sendPacket Nothing _ = return ()
-sendPacket (Just i) c = writeChan c $ EchoReply i
+readIcmp :: Socket -> IO (Maybe IcmpPacket)
+readIcmp sock = do
+	(str,len,addr) <- recvFrom sock 2048
+	let ippkt = parseIP str
+	let icmppkt = decodeICMP ippkt addr
+	return icmppkt
 
-runIcmpThread :: IcmpSender -> IO ()
-runIcmpThread (IcmpSender chan sock) = do
-	listenSock chan sock
-	where
-	listenSock :: Chan EchoReply -> Socket -> IO ()
-	listenSock chan sock = do
-		(str,len,addr) <- recvFrom sock 2048
-		let inpkt = parseIP str
-		let inicmp = decodeICMP inpkt addr
-		sendPacket inicmp chan
-		listenSock chan sock
-
+echoRequest :: Socket -> SockAddr -> Word16 -> Word16 -> BL.ByteString -> IO Int
+echoRequest sock addr id seq payload = do 
+	let p = IcmpPacket addr 8 0 id seq payload
+	sendTo sock (encodeICMP p) addr
 
 data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber, 
 	source :: HostAddress, dest :: HostAddress, upperData :: BL.ByteString }
 	deriving (Eq, Show)
-
-echoRequest :: IcmpSender -> SockAddr -> Word16 -> Word16 -> BL.ByteString -> IO Int
-echoRequest (IcmpSender _ sock) addr id seq payload = do 
-	let p = IcmpPacket addr 8 0 id seq payload
-	sendTo sock (encodeICMP p) addr
 
 encodeICMP :: IcmpPacket -> String
 encodeICMP pkt = unpack $ addIcmpChecksum $ runPut $ encode pkt
