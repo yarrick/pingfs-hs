@@ -11,7 +11,9 @@ import System
 
 import Icmp
 
-data PingEvent = IcmpData IcmpPacket | AddBlock { } | RemoveBlock { } | DataWanted { }
+data PingEvent = 
+	IcmpData IcmpPacket | 
+	AddBlock Word16 SockAddr BL.ByteString -- id, peer, data
 	deriving (Eq, Show)
 
 data PingSession = PingSession {
@@ -21,49 +23,57 @@ data PingSession = PingSession {
 }
 
 -- type alias for map with id->session info
-type PingMap = Map.Map Word16 PingSession
+type PingMap = Map.Map Word16 PingSession 
 
-processEvent :: PingEvent -> PingMap -> PingMap
-processEvent p m = m
+processEvent :: IcmpState -> PingEvent -> PingMap -> IO PingMap
+-- got pong, increase seqno and send ping
+processEvent is (IcmpData icmp) m = return m
+-- new block, add to map and send ping
+processEvent is (AddBlock id peer bytes) m = do
+	let sess = PingSession 1 peer 0
+	let map = Map.insert id sess m
+	echoRequest (sockState is) peer id 0 bytes
+	return map
 
-pinger :: Chan PingEvent -> IO ()
-pinger c = doPing c Map.empty
+pinger :: IcmpState -> IO ()
+pinger is = doPing is Map.empty
 
-doPing :: Chan PingEvent -> PingMap -> IO ()
-doPing chan map = do
-	ev <- readChan chan
+doPing :: IcmpState -> PingMap -> IO ()
+doPing is map = do
+	ev <- readChan $ chanState is
 	putStrLn $ show ev
-	doPing chan $ processEvent ev map
+	map2 <- processEvent is ev map
+	doPing is map2
 
 -- icmp receiver thread
 
--- State for sender
-data IcmpSender = IcmpSender {
-	chan :: Chan PingEvent, -- channel to send replies
-	sock :: Socket -- ICMP raw socket
+data IcmpState = IcmpState {
+	chanState :: Chan PingEvent, -- event channel
+	sockState :: Socket -- ICMP raw socket
 }
 
-createIcmpSender :: Chan PingEvent -> IO IcmpSender
-createIcmpSender c = withSocketsDo $ do
+createIcmpState :: Chan PingEvent -> IO IcmpState
+createIcmpState c = withSocketsDo $ do
 	sock <- openIcmpSocket
-	return (IcmpSender c sock)
+	return (IcmpState c sock)
 
 -- Forward EchoReply if parsing went fine
 sendPacket :: Maybe IcmpPacket -> Chan PingEvent -> IO ()
 sendPacket Nothing _ = return ()
 sendPacket (Just i) c = writeChan c $ IcmpData i
 
-runIcmpThread :: IcmpSender -> IO ()
-runIcmpThread (IcmpSender chan sock) = do
-	icmpPkt <- readIcmp sock
-	sendPacket icmpPkt chan
-	runIcmpThread (IcmpSender chan sock)
+runIcmpThread :: IcmpState -> IO ()
+runIcmpThread state = do
+	icmpPkt <- readIcmp $ sockState state
+	sendPacket icmpPkt $ chanState state
+	runIcmpThread state
 
-reader :: IcmpSender -> [SockAddr] -> IO ()
-reader is (s:ss) = do
+-- read a line of text and start it as a block
+reader :: IcmpState -> Word16 -> [SockAddr] -> IO ()
+reader is id (s:ss) = do
 	line <- getLine
-	echoRequest (sock is) s 15 22 $ pack line
-	reader is ss
+	writeChan (chanState is) $ AddBlock id s $ pack line
+	reader is (id + 1) ss 
 
 getHost :: String -> IO SockAddr
 getHost x = do
@@ -103,9 +113,9 @@ main = do
 	hosts <- parseArgs
 	checkHostCount hosts
 	pingChan <- newChan
-	icmpSender <- createIcmpSender pingChan
-	forkIO $ runIcmpThread icmpSender
-	forkIO $ pinger pingChan
+	icmpState <- createIcmpState pingChan
+	forkIO $ runIcmpThread icmpState
+	forkIO $ pinger icmpState
 	putStrLn "Input data. Press newline and it will be sent as ping to one of the given hosts"
-	reader icmpSender $ cycle hosts
+	reader icmpState 0 $ cycle hosts
 
