@@ -25,15 +25,22 @@ data PingSession = PingSession {
 -- type alias for map with id->session info
 type PingMap = Map.Map Word16 PingSession 
 
-processEvent :: IcmpState -> PingEvent -> PingMap -> IO PingMap
+-- Returns new map and optional ping to send encoded as string
+processEvent :: IcmpState -> PingEvent -> PingMap -> (PingMap, Maybe IcmpPacket)
 -- got pong, increase seqno and send ping
-processEvent is (IcmpData icmp) m = return m
+processEvent is (IcmpData icmp) m =
+	case sess of
+		Nothing -> (m, Nothing) -- if id does not match, discard it
+		Just s -> (map2 m s, Just $ echoRequest (icmpPeer icmp) (icmpId icmp) (pingSeqno s) (icmpPayload icmp))
+	where 
+	sess = Map.lookup (icmpId icmp) m
+	incSeq s = s { pingSeqno = (pingSeqno s) + 1 }
+	map2 m s = Map.insert (icmpId icmp) (incSeq s) m
 -- new block, add to map and send ping
-processEvent is (AddBlock id peer bytes) m = do
-	let sess = PingSession 1 peer 0
-	let map = Map.insert id sess m
-	echoRequest (sockState is) peer id 0 bytes
-	return map
+processEvent is (AddBlock id peer bytes) m = (map2, Just $ echoRequest peer id 0 bytes)
+	where 
+	sess = PingSession 1 peer 0
+	map2 = Map.insert id sess m
 
 pinger :: IcmpState -> IO ()
 pinger is = doPing is Map.empty
@@ -42,7 +49,8 @@ doPing :: IcmpState -> PingMap -> IO ()
 doPing is map = do
 	ev <- readChan $ chanState is
 	putStrLn $ show ev
-	map2 <- processEvent is ev map
+	let (map2, icmp) = processEvent is ev map
+	sendIcmp (sockState is) icmp
 	doPing is map2
 
 -- icmp receiver thread
