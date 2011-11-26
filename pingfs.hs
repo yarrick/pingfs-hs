@@ -26,13 +26,13 @@ data PingSession = PingSession {
 -- type alias for map with id->session info
 type PingMap = Map.Map Word16 PingSession 
 
--- Returns new map and optional ping to send encoded as string
+-- Returns new map and optional ping to send
 processEvent :: PingEvent -> PingMap -> (PingMap, Maybe IcmpPacket)
 -- got pong, increase seqno and send ping
 processEvent (IcmpData icmp) m =
 	case sess of
 		Nothing -> (m, Nothing) -- if id does not match, discard it
-		Just s -> (map2 m s, Just $ ping icmp s) -- otherwise increase seq and send new ping
+		Just s -> (map2 m s, Just $ ping icmp s) -- otherwise seq++ and resend ping
 	where 
 	sess = Map.lookup (icmpId icmp) m
 	incSeq s = s { pingSeqno = (pingSeqno s) + 1 }
@@ -69,8 +69,7 @@ reader (sock, chan) id (s:ss) = do
 
 parseHosts :: String -> IO [SockAddr]
 parseHosts file = readFile file >>= (\a -> return (lines a)) >>= mapM getHost
-	where
-	getHost x = do
+	where getHost x = do
 		let hints = defaultHints { addrFamily = AF_INET } -- ipv4 for now
 		addrs <- try $ getAddrInfo (Just hints) (Just x) Nothing
 		case addrs of
