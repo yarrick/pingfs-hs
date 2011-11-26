@@ -43,9 +43,7 @@ openIcmpSocket = withSocketsDo $ socket AF_INET Raw ipproto_icmp
 readIcmp :: Socket -> IO (Maybe IcmpPacket)
 readIcmp sock = do
 	(str,len,addr) <- recvFrom sock 2048
-	let ippkt = parseIP str
-	let icmppkt = decodeICMP ippkt addr
-	return icmppkt
+	return $ decodeICMP addr =<< parseIP str
 
 echoRequest :: SockAddr -> Word16 -> Word16 -> BL.ByteString -> IcmpPacket
 echoRequest addr id seq payload = IcmpPacket addr 8 0 id seq payload
@@ -59,7 +57,7 @@ data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber,
 	deriving (Eq, Show)
 
 encodeICMP :: IcmpPacket -> String
-encodeICMP pkt = unpack $ addIcmpChecksum $ runPut $ encode pkt
+encodeICMP = unpack . addIcmpChecksum . runPut . encode 
 	where
 	encode :: IcmpPacket -> Put
 	encode (IcmpPacket a t c i s p) = do
@@ -73,8 +71,8 @@ encodeICMP pkt = unpack $ addIcmpChecksum $ runPut $ encode pkt
 icmpChecksumOk :: BL.ByteString -> Bool
 icmpChecksumOk i = calcSum i == 0
 
-decodeICMP :: IpPacket -> SockAddr -> Maybe IcmpPacket
-decodeICMP ip addr 
+decodeICMP :: SockAddr -> IpPacket -> Maybe IcmpPacket
+decodeICMP addr ip
 	| ipv4icmp ip = case icmpChecksumOk (upperData ip) of
 		True -> Just $ IcmpPacket addr t c i s p
 		False -> Nothing
@@ -96,8 +94,12 @@ nibbles :: Word8 -> (Int, Int)
 nibbles a = (shiftR i 4, i .&. 0x0F)
 	where i = fromIntegral a
 
-parseIP :: String -> IpPacket
-parseIP b = parseIPV4 $ pack b
+parseIP :: String -> Maybe IpPacket
+parseIP b = case ver of
+	4 -> Just $ parseIPV4 pkt
+	_ -> Nothing
+	where 	pkt = pack b
+		(ver,len) = nibbles $ BL.head pkt
 
 parseIPV4 :: BL.ByteString -> IpPacket
 parseIPV4 pkt = IpPacket ver p s d upper
@@ -127,7 +129,7 @@ addIcmpChecksum a = BL.append start $ BL.append sum end
 calcSum :: BL.ByteString -> Int
 calcSum a = 0xFFFF - (s .&. 0xFFFF + shiftR s 16)
 	where 
-	s = sum $ merge16 $ BL.unpack a
+	s = sum . merge16 $ BL.unpack a
 	merge16 :: [Word8] -> [Int]
 	merge16 [] = []
 	merge16 (a:[]) = merge16 $ a:[0] -- pad with zero

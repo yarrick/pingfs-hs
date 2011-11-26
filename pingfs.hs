@@ -55,10 +55,9 @@ pinger (s, c) map = do
 -- icmp receiver thread
 runIcmpThread :: (Socket, Chan PingEvent) -> IO ()
 runIcmpThread (sock, chan) = do
-	icmpPkt <- readIcmp sock
-	mapM (writeChan chan) $ map (\i -> IcmpData i) $ 
-		filter isEchoReply $ maybeToList icmpPkt
+	mapM (writeChan chan) . wrapIcmp . filter isEchoReply . maybeToList =<< readIcmp sock
 	runIcmpThread (sock, chan)
+	where wrapIcmp l = map (\i -> IcmpData i) l
 
 -- read a line of text and start it as a block
 reader :: (Socket, Chan PingEvent) -> Word16 -> [SockAddr] -> IO ()
@@ -67,7 +66,7 @@ reader (sock, chan) id (s:ss) = do
 	reader (sock, chan) (id + 1) ss 
 
 parseHosts :: String -> IO [SockAddr]
-parseHosts file = mapM getHost . (\a -> lines a) =<< readFile file
+parseHosts file = mapM getHost . lines =<< readFile file
 	where getHost x = do
 		let hints = defaultHints { addrFamily = AF_INET } -- ipv4 for now
 		addrs <- try $ getAddrInfo (Just hints) (Just x) Nothing
@@ -76,7 +75,7 @@ parseHosts file = mapM getHost . (\a -> lines a) =<< readFile file
 			Right a -> return $ addrAddress $ head a
 
 checkNotEmpty :: [a] -> String -> ([a] -> IO ()) -> IO ()
-checkNotEmpty [] err fun = putStrLn err >> exitFailure
+checkNotEmpty [] err _ = putStrLn err >> exitFailure
 checkNotEmpty a _ fun = fun a
 
 parseArgs :: IO [SockAddr]
