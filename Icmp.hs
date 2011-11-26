@@ -38,7 +38,7 @@ instance Show IcmpPacket where
 		" data " ++ show (icmpPayload i)
 
 openIcmpSocket :: IO Socket
-openIcmpSocket = socket AF_INET Raw ipproto_icmp
+openIcmpSocket = withSocketsDo $ socket AF_INET Raw ipproto_icmp
 
 readIcmp :: Socket -> IO (Maybe IcmpPacket)
 readIcmp sock = do
