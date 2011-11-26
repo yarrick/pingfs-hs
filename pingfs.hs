@@ -63,12 +63,11 @@ runIcmpThread (sock, chan) = do
 -- read a line of text and start it as a block
 reader :: (Socket, Chan PingEvent) -> Word16 -> [SockAddr] -> IO ()
 reader (sock, chan) id (s:ss) = do
-	line <- getLine
-	writeChan chan $ AddBlock id s $ pack line
+	writeChan chan . (\l -> AddBlock id s $ pack l) =<< getLine
 	reader (sock, chan) (id + 1) ss 
 
 parseHosts :: String -> IO [SockAddr]
-parseHosts file = readFile file >>= (\a -> return (lines a)) >>= mapM getHost
+parseHosts file = mapM getHost . (\a -> lines a) =<< readFile file
 	where getHost x = do
 		let hints = defaultHints { addrFamily = AF_INET } -- ipv4 for now
 		addrs <- try $ getAddrInfo (Just hints) (Just x) Nothing
