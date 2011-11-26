@@ -19,7 +19,8 @@ data PingEvent =
 data PingSession = PingSession {
 	pingSeqno :: Word16,
 	pingPeer :: SockAddr,
-	pingTime :: Int
+	pingTime :: Int -- todo use better type
+	-- todo add length?
 }
 
 -- type alias for map with id->session info
@@ -66,15 +67,11 @@ createIcmpState c = withSocketsDo $ do
 	sock <- openIcmpSocket
 	return (IcmpState c sock)
 
--- Forward EchoReply if parsing went fine
-sendPacket :: Maybe IcmpPacket -> Chan PingEvent -> IO ()
-sendPacket Nothing _ = return ()
-sendPacket (Just i) c = writeChan c $ IcmpData i
-
 runIcmpThread :: IcmpState -> IO ()
 runIcmpThread state = do
 	icmpPkt <- readIcmp $ sockState state
-	sendPacket icmpPkt $ chanState state
+	mapM (writeChan $ chanState state) $ map (\i -> IcmpData i) $ 
+		filter isEchoReply $ maybeToList icmpPkt
 	runIcmpThread state
 
 -- read a line of text and start it as a block

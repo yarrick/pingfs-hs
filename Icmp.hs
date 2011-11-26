@@ -1,4 +1,5 @@
-module Icmp (openIcmpSocket, IcmpPacket(..), readIcmp, echoRequest, sendIcmp) where
+module Icmp (openIcmpSocket, IcmpPacket(..), readIcmp, 
+	echoRequest, sendIcmp, isEchoRequest, isEchoReply) where
 import Control.Concurrent.Chan
 import Network.Socket
 import Data.Word
@@ -17,10 +18,16 @@ data IcmpPacket = IcmpPacket {
 	icmpPayload :: BL.ByteString }
 	deriving Eq
 
+isEchoReply :: IcmpPacket -> Bool
+isEchoReply i = icmpType i == 0
+
+isEchoRequest :: IcmpPacket -> Bool
+isEchoRequest i = icmpType i == 8
+
 icmpTypeName :: IcmpPacket -> String
 icmpTypeName a 
-	| icmpType a == 8 = "Ping to"
-	| icmpType a == 0 = "Pong from"
+	| isEchoRequest a = "Ping to"
+	| isEchoReply a = "Pong from"
 	| otherwise = "Junk (" ++ show (icmpType a) ++ ") from"
 
 instance Show IcmpPacket where
