@@ -27,10 +27,11 @@ data PingSession = PingSession {
 -- type alias for map with id->session info
 type PingMap = Map.Map Word16 PingSession 
 
--- handle icmp reply. update seqno and timestamp if seqno matches
+-- handle icmp reply. update seqno and timestamp if seqno and addr matches
 processIcmp:: IcmpPacket -> PingSession -> ClockTime -> PingMap -> (PingMap, Maybe IcmpPacket)
 processIcmp i s now m 
-	| pingSeqNo s == icmpSeqNo i = (map, Just $ requestFromReply i (pingSeqNo sess))
+	| (pingSeqNo s == icmpSeqNo i) && (pingPeer s == icmpPeer i) =
+		(map, Just $ requestFromReply i (pingSeqNo sess))
 	| otherwise = (m, Nothing)
 	where	sess = s { pingSeqNo = (pingSeqNo s) + 1, pingTime = now }
 		map = Map.insert (icmpId i) sess m
