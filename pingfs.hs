@@ -82,28 +82,23 @@ parseHosts file = do
 	l <- readFile file
 	mapM getHost (lines l)
 
-checkArgs :: [String] -> IO ()
-checkArgs [] = do
-	putStrLn "Need one argument; a file with one hostname/IP per line."
+checkNotEmpty :: [a] -> String -> ([a] -> IO ()) -> IO ()
+checkNotEmpty [] err fun = do
+	putStrLn err
 	exitFailure
-checkArgs _ = return ()
+checkNotEmpty a _ fun = fun a
 
 parseArgs :: IO [SockAddr]
 parseArgs = do
 	args <- getArgs
-	checkArgs args
+	checkNotEmpty args "Need one argument; a file with one hostname/IP per line." (\a -> return ())
 	parseHosts $ head args
-
-checkHostCount :: [SockAddr] -> IO ()
-checkHostCount [] = do
-	putStrLn "Need at least one host!"
-	exitFailure
-checkHostCount x = putStrLn $ "Resolved " ++ show (length x) ++ " hosts."
 
 main :: IO ()
 main = do
 	hosts <- parseArgs
-	checkHostCount hosts
+	checkNotEmpty hosts "Need at least one host!" 
+		(\a -> putStrLn $ "Resolved " ++ show (length a) ++ " hosts.")
 	pingChan <- newChan
 	icmpSock <- openIcmpSocket
 	let state = (icmpSock, pingChan)
