@@ -67,31 +67,24 @@ reader (sock, chan) id (s:ss) = do
 	writeChan chan $ AddBlock id s $ pack line
 	reader (sock, chan) (id + 1) ss 
 
-getHost :: String -> IO SockAddr
-getHost x = do
-	let hints = defaultHints { addrFamily = AF_INET } -- ipv4 for now
-	addrs <- try $ getAddrInfo (Just hints) (Just x) Nothing
-	case addrs of
-		Left e -> do
-			putStrLn $ "Failed to lookup host " ++ x
-			ioError e
-		Right a -> return $ addrAddress $ head a
-
 parseHosts :: String -> IO [SockAddr]
-parseHosts file = do
-	l <- readFile file
-	mapM getHost (lines l)
+parseHosts file = readFile file >>= (\a -> return (lines a)) >>= mapM getHost
+	where
+	getHost x = do
+		let hints = defaultHints { addrFamily = AF_INET } -- ipv4 for now
+		addrs <- try $ getAddrInfo (Just hints) (Just x) Nothing
+		case addrs of
+			Left e -> putStrLn ("Failed to lookup host " ++ x) >> ioError e
+			Right a -> return $ addrAddress $ head a
 
 checkNotEmpty :: [a] -> String -> ([a] -> IO ()) -> IO ()
-checkNotEmpty [] err fun = do
-	putStrLn err
-	exitFailure
+checkNotEmpty [] err fun = putStrLn err >> exitFailure
 checkNotEmpty a _ fun = fun a
 
 parseArgs :: IO [SockAddr]
 parseArgs = do
 	args <- getArgs
-	checkNotEmpty args "Need one argument; a file with one hostname/IP per line." (\a -> return ())
+	checkNotEmpty args "Need one argument; a file with one hostname/IP per line." (\_ -> return ())
 	parseHosts $ head args
 
 main :: IO ()
