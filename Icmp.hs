@@ -50,11 +50,9 @@ readIcmp sock = do
 echoRequest :: SockAddr -> Word16 -> Word16 -> BL.ByteString -> IcmpPacket
 echoRequest addr id seq payload = IcmpPacket addr 8 0 id seq payload
 
-sendIcmp :: Socket -> Maybe IcmpPacket -> IO ()
-sendIcmp _ Nothing = return ()
-sendIcmp s (Just i) = do
-	sendTo s (encodeICMP i) (icmpPeer i)
-	return ()
+sendIcmp :: Socket -> Maybe IcmpPacket -> IO Int
+sendIcmp _ Nothing = return 0
+sendIcmp s (Just i) = sendTo s (encodeICMP i) (icmpPeer i)
 
 data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber, 
 	source :: HostAddress, dest :: HostAddress, upperData :: BL.ByteString }
