@@ -32,12 +32,11 @@ processEvent :: PingEvent -> PingMap -> (PingMap, Maybe IcmpPacket)
 processEvent (IcmpData icmp) m =
 	case sess of
 		Nothing -> (m, Nothing) -- if id does not match, discard it
-		Just s -> (map2 m s, Just $ ping icmp s) -- otherwise seq++ and resend ping
+		Just s -> (map2 m s, Just $ requestFromReply icmp (pingSeqno s))
 	where 
 	sess = Map.lookup (icmpId icmp) m
 	incSeq s = s { pingSeqno = (pingSeqno s) + 1 }
 	map2 m s = Map.insert (icmpId icmp) (incSeq s) m
-	ping icmp s = echoRequest (icmpPeer icmp) (icmpId icmp) (pingSeqno s) (icmpPayload icmp)
 -- new block, add to map and send ping
 processEvent (AddBlock id peer bytes) m = (map2, Just $ echoRequest peer id 0 bytes)
 	where 

@@ -1,5 +1,5 @@
 module Icmp (openIcmpSocket, IcmpPacket(..), readIcmp, 
-	echoRequest, sendIcmp, isEchoRequest, isEchoReply) where
+	echoRequest, requestFromReply, sendIcmp, isEchoRequest, isEchoReply) where
 import Control.Concurrent.Chan
 import Network.Socket
 import Data.Word
@@ -47,6 +47,9 @@ readIcmp sock = do
 
 echoRequest :: SockAddr -> Word16 -> Word16 -> BL.ByteString -> IcmpPacket
 echoRequest addr id seq payload = IcmpPacket addr 8 0 id seq payload
+
+requestFromReply :: IcmpPacket -> Word16 -> IcmpPacket
+requestFromReply ip seq = ip { icmpSeqNo = seq, icmpType = 8 }
 
 sendIcmp :: Socket -> Maybe IcmpPacket -> IO Int
 sendIcmp _ Nothing = return 0
