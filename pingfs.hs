@@ -27,6 +27,8 @@ data PingSession = PingSession {
 -- type alias for map with id->session info
 type PingMap = Map.Map Word16 PingSession 
 
+type IcmpState = (Socket, Chan PingEvent)
+
 -- handle icmp reply. update seqno and timestamp if seqno and addr matches
 processIcmp:: IcmpPacket -> PingSession -> ClockTime -> PingMap -> (PingMap, Maybe IcmpPacket)
 processIcmp i s now m 
@@ -51,27 +53,27 @@ processEvent (AddBlock id peer bytes) now m =
 	sess = PingSession 1 peer now
 	map2 = Map.insert id sess m
 
-pinger :: (Socket, Chan PingEvent) -> PingMap -> IO ()
-pinger (s, c) map = do
+pinger :: IcmpState -> PingMap -> IO ()
+pinger is@(s,c) map = do
 	ev <- readChan c
 	putStrLn $ show ev
 	now <- getClockTime
 	let (map2, icmp) = processEvent ev now map
 	sendIcmp s icmp
-	pinger (s, c) map2
+	pinger is map2
 
 -- icmp receiver thread
-runIcmpThread :: (Socket, Chan PingEvent) -> IO ()
-runIcmpThread (sock, chan) = do
+runIcmpThread :: IcmpState -> IO ()
+runIcmpThread is@(sock,chan) = do
 	mapM (writeChan chan) . wrapIcmp . filter isEchoReply . maybeToList =<< readIcmp sock
-	runIcmpThread (sock, chan)
+	runIcmpThread is
 	where wrapIcmp l = map (\i -> IcmpData i) l
 
 -- read a line of text and start it as a block
-reader :: (Socket, Chan PingEvent) -> Word16 -> [SockAddr] -> IO ()
-reader (sock, chan) id (s:ss) = do
+reader :: IcmpState -> Word16 -> [SockAddr] -> IO ()
+reader is@(sock,chan) id (s:ss) = do
 	writeChan chan . (\l -> AddBlock id s $ pack l) =<< getLine
-	reader (sock, chan) (id + 1) ss 
+	reader is (id + 1) ss
 
 parseHosts :: String -> IO [SockAddr]
 parseHosts file = mapM getHost . lines =<< readFile file
