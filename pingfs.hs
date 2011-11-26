@@ -8,6 +8,7 @@ import qualified Data.Map as Map
 import Network.Socket
 import Maybe
 import System
+import Time
 
 import Icmp
 
@@ -17,37 +18,43 @@ data PingEvent =
 	deriving (Eq, Show)
 
 data PingSession = PingSession {
-	pingSeqno :: Word16,
+	pingSeqNo :: Word16,
 	pingPeer :: SockAddr,
-	pingTime :: Int -- todo use better type
+	pingTime :: ClockTime
 	-- todo add length?
 }
 
 -- type alias for map with id->session info
 type PingMap = Map.Map Word16 PingSession 
 
+-- handle icmp reply. update seqno and timestamp if seqno matches
+processIcmp:: IcmpPacket -> PingSession -> ClockTime -> PingMap -> (PingMap, Maybe IcmpPacket)
+processIcmp i s now m 
+	| pingSeqNo s == icmpSeqNo i = (map, Just $ requestFromReply i (pingSeqNo sess))
+	| otherwise = (m, Nothing)
+	where	sess = s { pingSeqNo = (pingSeqNo s) + 1, pingTime = now }
+		map = Map.insert (icmpId i) sess m
+
 -- Returns new map and optional ping to send
-processEvent :: PingEvent -> PingMap -> (PingMap, Maybe IcmpPacket)
+processEvent :: PingEvent -> ClockTime -> PingMap -> (PingMap, Maybe IcmpPacket)
 -- got pong, increase seqno and send ping
-processEvent (IcmpData icmp) m =
+processEvent (IcmpData icmp) now m =
 	case sess of
 		Nothing -> (m, Nothing) -- if id does not match, discard it
-		Just s -> (map2 m s, Just $ requestFromReply icmp (pingSeqno s))
-	where 
-	sess = Map.lookup (icmpId icmp) m
-	incSeq s = s { pingSeqno = (pingSeqno s) + 1 }
-	map2 m s = Map.insert (icmpId icmp) (incSeq s) m
+		Just s -> processIcmp icmp s now m
+	where sess = Map.lookup (icmpId icmp) m
 -- new block, add to map and send ping
-processEvent (AddBlock id peer bytes) m = (map2, Just $ echoRequest peer id 0 bytes)
+processEvent (AddBlock id peer bytes) now m = (map2, Just $ echoRequest peer id 1 bytes)
 	where 
-	sess = PingSession 1 peer 0
+	sess = PingSession 1 peer now
 	map2 = Map.insert id sess m
 
 pinger :: (Socket, Chan PingEvent) -> PingMap -> IO ()
 pinger (s, c) map = do
 	ev <- readChan c
 	putStrLn $ show ev
-	let (map2, icmp) = processEvent ev map
+	now <- getClockTime
+	let (map2, icmp) = processEvent ev now map
 	sendIcmp s icmp
 	pinger (s, c) map2
 
