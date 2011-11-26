@@ -45,7 +45,8 @@ processEvent (IcmpData icmp) now m =
 		Just s -> processIcmp icmp s now m
 	where sess = Map.lookup (icmpId icmp) m
 -- new block, add to map and send ping
-processEvent (AddBlock id peer bytes) now m = (map2, Just $ echoRequest peer id 1 bytes)
+processEvent (AddBlock id peer bytes) now m = 
+		(map2, Just $ echoRequest peer id (pingSeqNo sess) bytes)
 	where 
 	sess = PingSession 1 peer now
 	map2 = Map.insert id sess m
