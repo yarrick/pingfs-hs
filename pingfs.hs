@@ -142,11 +142,22 @@ pingCreateFile (FsState m c) ('/':name) RegularFile mode _ = do
 	writeIORef m $ Map.insert name (File 0 mode) mm
 	return eOK
 
+pingRenameFile :: FsState -> FilePath -> FilePath -> IO Errno
+pingRenameFile (FsState m c) ('/':from) ('/':to) = do
+	mm <- readIORef m
+	putStrLn $ from ++ " move " ++ to
+	case Map.lookup from mm of
+		Nothing -> return eNOENT
+		Just a -> do
+			writeIORef m $ Map.insert to a $ Map.delete from mm
+			return eOK
+
 pingOps :: FsState -> FuseOperations PingHandle
 pingOps p = defaultFuseOps {
 	fuseGetFileStat = pingGetFileStat p,
 	fuseCreateDevice = pingCreateFile p,
 	fuseSetOwnerAndGroup = pingNoOp p,
+	fuseRename = pingRenameFile p,
 	fuseSetFileTimes = pingNoOp p,
 	fuseOpenDirectory = pingDoDir p,
 	fuseReadDirectory = pingReadDir p,
