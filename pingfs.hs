@@ -119,6 +119,15 @@ pingGetFileStat (FsState i c) ('/':name)= do
 		Just (File len mode) -> return $ Right $ fileStat ctx RegularFile 1 len mode
 		Nothing -> return $ Left eNOENT
 
+updateMapIfFound :: FsState -> String -> (FileMap -> String -> File -> FileMap) -> IO Errno
+updateMapIfFound (FsState m c) name fun = do
+	mm <- readIORef m
+	case Map.lookup name mm of
+		Nothing -> return eNOENT
+		Just a -> do
+			writeIORef m $ fun mm name a
+			return eOK
+
 -- settime, setowner
 pingNoOp _ _ _ _ = return eOK
 
@@ -143,23 +152,11 @@ pingCreateFile (FsState m c) ('/':name) RegularFile mode _ = do
 	return eOK
 
 pingUnlink :: FsState -> FilePath -> IO Errno
-pingUnlink (FsState m c) ('/':name) = do
-	mm <- readIORef m
-	case Map.lookup name mm of
-		Nothing -> return eNOENT
-		Just a -> do
-			writeIORef m $ Map.delete name mm
-			return eOK
-			
+pingUnlink fs ('/':name) = updateMapIfFound fs name (\m n _ -> Map.delete n m)
 
 pingRenameFile :: FsState -> FilePath -> FilePath -> IO Errno
-pingRenameFile (FsState m c) ('/':from) ('/':to) = do
-	mm <- readIORef m
-	case Map.lookup from mm of
-		Nothing -> return eNOENT
-		Just a -> do
-			writeIORef m $ Map.insert to a $ Map.delete from mm
-			return eOK
+pingRenameFile fs ('/':from) ('/':to) = updateMapIfFound fs from
+	(\m n f -> Map.insert to f $ Map.delete n m)
 
 pingOps :: FsState -> FuseOperations PingHandle
 pingOps p = defaultFuseOps {
