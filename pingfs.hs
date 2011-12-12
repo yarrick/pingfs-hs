@@ -3,6 +3,7 @@ import Control.Concurrent.Chan
 import Control.Exception
 import Data.ByteString.Lazy.Char8 (unpack, pack)
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString as B
 import Data.Word
 import qualified Data.Map as Map
 import Data.IORef
@@ -33,6 +34,8 @@ data PingSession = PingSession {
 type PingMap = Map.Map Word16 PingSession 
 
 type IcmpState = (Socket, Chan PingEvent)
+
+blockSize = 128
 
 -- handle icmp reply. update seqno and timestamp if seqno and addr matches
 processIcmp:: IcmpPacket -> PingSession -> ClockTime -> PingMap -> (PingMap, Maybe IcmpPacket)
@@ -95,10 +98,22 @@ showHelp = mapM putStrLn [
 	"pingfs - written by Erik Ekman in 2011"
 	] >> return ()
 
-type PingHandle = ()
-data File = File FileOffset FileMode -- len mode
+data PingHandle = PingHandle FsState String OpenMode FileOffset -- fs name mode pos
+data File = File FileOffset FileMode [Word16] -- len mode blocks
 type FileMap = Map.Map String File
-data FsState = FsState (IORef FileMap) (Chan PingEvent)
+data FsState = FsState {
+		fsmap :: IORef FileMap,
+		fschan :: Chan PingEvent,
+		fspeer :: [SockAddr]
+}
+
+writeBlock :: PingHandle -> B.ByteString -> FileOffset -> IORef FileMap -> FileMap -> String -> File -> IO (Either Errno ByteCount)
+writeBlock (PingHandle fs _ _ n) b off m mm name (File len mode actBlocks) = do
+	--let (block, blockoffset) = quotRem (B.length b) blockSize
+	let payload = BL.fromChunks [B.take blockSize b]
+	writeChan (fschan fs) $ AddBlock 0 (head $ fspeer fs) payload
+	putStrLn $ "write to file " ++ name ++ " at " ++ show off ++ " data " ++ show b
+	return $ Right . fromIntegral $ BL.length payload
 
 fileStat ctx etype link len mode = FileStat { 
 	statEntryType = etype, statFileMode = mode,
@@ -112,21 +127,24 @@ pingGetFileStat :: FsState -> FilePath -> IO (Either Errno FileStat)
 pingGetFileStat _ "/" = do
 	ctx <- getFuseContext
 	return $ Right $ dirStat ctx
-pingGetFileStat (FsState i c) ('/':name)= do
+pingGetFileStat fs ('/':name)= do
 	ctx <- getFuseContext
-	m <- readIORef i
+	m <- readIORef $ fsmap fs
 	case Map.lookup name m of
-		Just (File len mode) -> return $ Right $ fileStat ctx RegularFile 1 len mode
+		Just (File len mode _) -> return $ Right $ fileStat ctx RegularFile 1 len mode
 		Nothing -> return $ Left eNOENT
 
-updateMapIfFound :: FsState -> String -> (FileMap -> String -> File -> FileMap) -> IO Errno
-updateMapIfFound (FsState m c) name fun = do
+lookupFile :: FsState -> String -> (IORef FileMap -> FileMap -> String -> File -> IO a) -> a -> IO a
+lookupFile fs name fun err = do
+	let m = fsmap fs
 	mm <- readIORef m
 	case Map.lookup name mm of
-		Nothing -> return eNOENT
-		Just a -> do
-			writeIORef m $ fun mm name a
-			return eOK
+		Nothing -> return err
+		Just a -> fun m mm name a
+
+updateMapIfFound :: FsState -> String -> (FileMap -> String -> File -> FileMap) -> IO Errno
+updateMapIfFound fs n fun = lookupFile fs n updateMap eNOENT
+	where updateMap m mm name a = writeIORef m (fun mm name a) >> return eOK
 
 -- settime, setowner
 pingNoOp _ _ _ _ = return eOK
@@ -137,18 +155,19 @@ pingDoDir _ "/" = return eOK
 pingDoDir _ _ = return eNOENT
 
 pingReadDir :: FsState -> FilePath -> IO (Either Errno [(FilePath, FileStat)])
-pingReadDir (FsState i c) "/" = do
+pingReadDir fs "/" = do
 	ctx <- getFuseContext
-	m <- readIORef i
+	m <- readIORef $ fsmap fs
 	return $ Right $ map (dir ctx) [".",".."] ++ map (listFile ctx) (Map.toList m) 
-	where 	listFile ctx (a,File len mode) = (a, fileStat ctx RegularFile 1 len mode)
+	where 	listFile ctx (a,File len mode _) = (a, fileStat ctx RegularFile 1 len mode)
 		dir ctx x = (x, dirStat ctx)
 pingReadDir _ _ = return $ Left eNOENT
 
 pingCreateFile :: FsState -> FilePath -> EntryType -> FileMode -> DeviceID -> IO Errno
-pingCreateFile (FsState m c) ('/':name) RegularFile mode _ = do
+pingCreateFile fs ('/':name) RegularFile mode _ = do
+	let m = fsmap fs
 	mm <- readIORef m
-	writeIORef m $ Map.insert name (File 0 mode) mm
+	writeIORef m $ Map.insert name (File 0 mode []) mm
 	return eOK
 
 pingUnlink :: FsState -> FilePath -> IO Errno
@@ -158,6 +177,24 @@ pingRenameFile :: FsState -> FilePath -> FilePath -> IO Errno
 pingRenameFile fs ('/':from) ('/':to) = updateMapIfFound fs from
 	(\m n f -> Map.insert to f $ Map.delete n m)
 
+-- todo handle truncation (trunc flags == True)
+pingOpenFile :: FsState -> FilePath -> OpenMode -> OpenFileFlags -> IO (Either Errno PingHandle)
+pingOpenFile fs ('/':n) mode flags = lookupFile fs n openFile (Left eNOENT)
+	where openFile m mm name a = return $ Right $ PingHandle fs name mode $ pos a flags
+		where pos (File len mode _) f 
+			| append f = len
+			| otherwise = 0
+
+pingWrite :: FilePath -> PingHandle -> B.ByteString -> FileOffset -> IO (Either Errno ByteCount)
+pingWrite _ (PingHandle _  _ ReadOnly _) _ _ = return $ Left ePERM -- no write if readonly
+pingWrite _ ph@(PingHandle fs n _ _) b off = lookupFile fs n (writeBlock ph b off) (Left eNOENT)
+
+pingFlush :: FilePath -> PingHandle -> IO Errno
+pingFlush _ _ = return eOK
+
+pingCloseFile :: FilePath -> PingHandle -> IO ()
+pingCloseFile _ _ = return ()
+
 pingOps :: FsState -> FuseOperations PingHandle
 pingOps p = defaultFuseOps {
 	fuseGetFileStat = pingGetFileStat p,
@@ -166,6 +203,10 @@ pingOps p = defaultFuseOps {
 	fuseRemoveLink = pingUnlink p,
 	fuseRename = pingRenameFile p,
 	fuseSetFileTimes = pingNoOp p,
+	fuseOpen = pingOpenFile p,
+	fuseWrite = pingWrite,
+	fuseFlush = pingFlush,
+	fuseRelease = pingCloseFile,
 	fuseOpenDirectory = pingDoDir p,
 	fuseReadDirectory = pingReadDir p,
 	fuseReleaseDirectory = pingDoDir p
@@ -190,7 +231,7 @@ main = do
 	forkIO $ runIcmpThread state
 	forkIO $ pinger state Map.empty
 	iomap <- newIORef $ Map.empty
-	let fstate = FsState iomap pingChan
+	let fstate = FsState iomap pingChan hosts
 	putStrLn $ "Mounting pingfs at " ++ mpoint ++ ", using " ++ show (length hosts) ++ " hosts"
 	putStrLn "Please be kind to your network."
 	withArgs (mpoint:["-f"]) $ fuseMain (pingOps fstate) defaultExceptionHandler
