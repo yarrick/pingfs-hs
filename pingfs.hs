@@ -94,7 +94,7 @@ showHelp :: IO ()
 showHelp = mapM putStrLn [
 	"Usage: pingfs mountpoint hostfile", "",
 	"Mountpoint is empty directory to contain pingfs file system",
-	"Hostfile is text file with one host per line (a.example.com or 10.2.2.1 and so on)", "",
+	"Hostfile is text file with one host per line (a.example.com or 10.2.2.1 etc)", "",
 	"pingfs - written by Erik Ekman in 2011"
 	] >> return ()
 
