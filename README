@@ -1,0 +1,51 @@
+pingfs - by Erik Ekman <erik@kryo.se>
+
+An attempt at a toy filesystem using the network connection for storage.
+The content of its files are not stored in RAM or local disks but in
+ICMP Echo Request (Ping) packets that are sent to remote hosts. When and
+if the data arrives back in a Echo Reply it will be available for reading
+or writing to, and it will be sent out again. If no reply arrives, that
+part of the data is lost.
+
+The available bandwidth (and sanity) will limit the storage space inside the
+file system. Selecting hosts that are close will give short latency and better
+reliability but give less storage. Hosts on the other side of the globe will
+take longer to respond which means a slower experience but space for more data.
+
+pingfs uses raw sockets and FUSE, so it requires superuser rights to run.
+It is written in Haskell.
+
+This project is unfinished and abandoned. It can mount a directory, create
+files and write to them. The data of the files is sent out to the ping hosts.
+Reading or changing the file content is not supported.
+IPv6 is not supported.
+
+Note: It seems the ICMP checksum generation does not work anymore, probably
+broke when updating to a newer ByteString or something. So remote hosts will
+not answer the pings.
+
+Start it with:
+pingfs <mountdir> <hostfile>
+mountdir is where the new filesystem will be mounted
+hostfile is a file with targets, one hostname/IP per line
+
+Stop it with ^C (pressing twice needed?)
+Unmount the directory manually with fusermount -u <mountdir>
+
+Please use the tool wisely to avoid abuse complaints.
+
+License:
+
+Copyright (c) 2011-2015 Erik Ekman <yarrick@kryo.se>
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.

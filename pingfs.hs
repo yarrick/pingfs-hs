@@ -215,7 +215,7 @@ pingOps p = defaultFuseOps {
 parseArgs :: IO ([SockAddr], String)
 parseArgs = do
 	args <- getArgs
-	checkNotEmpty args "First argument must me mount directory"
+	checkNotEmpty args "First argument must be mount directory"
 	let (mpoint : aargs) = args
 	checkNotEmpty aargs "Second argument must be a file with one hostname/IP per line."
 	hosts <- parseHosts $ head aargs
