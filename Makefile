@@ -5,7 +5,7 @@
 all: pingfs
 
 pingfs: pingfs.hs Icmp.hs
-	ghc --make -threaded pingfs.hs -O2 -o $@
+	ghc --make -threaded $^ -O2 -o $@
 
 run: pingfs
 	sudo ./pingfs foo hosts
