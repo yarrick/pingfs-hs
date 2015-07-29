@@ -1,4 +1,4 @@
-module Icmp (openIcmpSocket, IcmpPacket(..), readIcmp, 
+module Icmp (openIcmpSocket, IcmpPacket(..), readIcmp,
 	echoRequest, requestFromReply, sendIcmp, isEchoRequest, isEchoReply) where
 import Control.Concurrent.Chan
 import Network.Socket
@@ -9,12 +9,12 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Binary.Put
 import Data.Binary.Get
 
-data IcmpPacket = IcmpPacket { 
+data IcmpPacket = IcmpPacket {
 	icmpPeer :: SockAddr,
-	icmpType :: Word8, 
-	icmpCode :: Word8, 
-	icmpId :: Word16, 
-	icmpSeqNo :: Word16, 
+	icmpType :: Word8,
+	icmpCode :: Word8,
+	icmpId :: Word16,
+	icmpSeqNo :: Word16,
 	icmpPayload :: BL.ByteString }
 	deriving Eq
 
@@ -25,16 +25,16 @@ isEchoRequest :: IcmpPacket -> Bool
 isEchoRequest i = icmpType i == 8
 
 icmpTypeName :: IcmpPacket -> String
-icmpTypeName a 
+icmpTypeName a
 	| isEchoRequest a = "Ping to"
 	| isEchoReply a = "Pong from"
 	| otherwise = "Junk (" ++ show (icmpType a) ++ ") from"
 
 instance Show IcmpPacket where
-	show i = icmpTypeName i ++ 
+	show i = icmpTypeName i ++
 		" peer " ++ show (icmpPeer i) ++
 		" id " ++ show (icmpId i) ++
-		" seq " ++ show (icmpSeqNo i) ++ 
+		" seq " ++ show (icmpSeqNo i) ++
 		" data " ++ show (icmpPayload i)
 
 openIcmpSocket :: IO Socket
@@ -55,12 +55,12 @@ sendIcmp :: Socket -> Maybe IcmpPacket -> IO Int
 sendIcmp _ Nothing = return 0
 sendIcmp s (Just i) = sendTo s (encodeICMP i) (icmpPeer i)
 
-data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber, 
+data IpPacket = IpPacket { version :: Int, proto :: ProtocolNumber,
 	source :: HostAddress, dest :: HostAddress, upperData :: BL.ByteString }
 	deriving (Eq, Show)
 
 encodeICMP :: IcmpPacket -> String
-encodeICMP = unpack . addIcmpChecksum . runPut . encode 
+encodeICMP = unpack . addIcmpChecksum . runPut . encode
 	where
 	encode :: IcmpPacket -> Put
 	encode (IcmpPacket a t c i s p) = do
@@ -80,7 +80,7 @@ decodeICMP addr ip
 		True -> Just $ IcmpPacket addr t c i s p
 		False -> Nothing
 	| otherwise = Nothing
-	where 
+	where
 	ipv4icmp pkt = (version pkt == 4) && (proto pkt == ipproto_icmp)
 	(t,c,i,s,p) = runGet parseICMP (upperData ip)
 	parseICMP :: Get (Word8, Word8, Word16, Word16, BL.ByteString)
@@ -106,7 +106,7 @@ parseIP b = case ver of
 
 parseIPV4 :: BL.ByteString -> IpPacket
 parseIPV4 pkt = IpPacket ver p s d upper
-	where 
+	where
 	(ver, len) = nibbles $ BL.head pkt
 	hdrlen = fromIntegral $ 4 * len
 	upper = BL.drop hdrlen pkt
@@ -123,7 +123,7 @@ parseIPV4 pkt = IpPacket ver p s d upper
 -- calculate and insert checksum
 addIcmpChecksum :: BL.ByteString -> BL.ByteString
 addIcmpChecksum a = BL.append start $ BL.append sum end
-	where 	
+	where
 	start = BL.take 2 a
 	end = BL.drop 4 a
 	sum = BL.pack $ map fromIntegral [shiftR csum 8, csum .&. 0xFF]
@@ -131,7 +131,7 @@ addIcmpChecksum a = BL.append start $ BL.append sum end
 
 calcSum :: BL.ByteString -> Int
 calcSum a = 0xFFFF - (s .&. 0xFFFF + shiftR s 16)
-	where 
+	where
 	s = sum . merge16 $ BL.unpack a
 	merge16 :: [Word8] -> [Int]
 	merge16 [] = []
