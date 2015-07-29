@@ -8,18 +8,18 @@ import Data.Word
 import qualified Data.Map as Map
 import Data.IORef
 import Network.Socket
-import Maybe
-import System
+import Data.Maybe
 import System.Environment
 import System.Fuse
 import System.Posix.Files
 import System.Posix.Types
-import Time
+import System.Time
+import System.Exit
 
 import Icmp
 
-data PingEvent = 
-	IcmpData IcmpPacket | 
+data PingEvent =
+	IcmpData IcmpPacket |
 	AddBlock Word16 SockAddr BL.ByteString -- id, peer, data
 	deriving (Eq, Show)
 
@@ -31,7 +31,7 @@ data PingSession = PingSession {
 }
 
 -- type alias for map with id->session info
-type PingMap = Map.Map Word16 PingSession 
+type PingMap = Map.Map Word16 PingSession
 
 type IcmpState = (Socket, Chan PingEvent)
 
@@ -39,7 +39,7 @@ blockSize = 128
 
 -- handle icmp reply. update seqno and timestamp if seqno and addr matches
 processIcmp:: IcmpPacket -> PingSession -> ClockTime -> PingMap -> (PingMap, Maybe IcmpPacket)
-processIcmp i s now m 
+processIcmp i s now m
 	| (pingSeqNo s == icmpSeqNo i) && (pingPeer s == icmpPeer i) =
 		(map, Just $ requestFromReply i (pingSeqNo sess))
 	| otherwise = (m, Nothing)
@@ -55,9 +55,9 @@ processEvent (IcmpData icmp) now m =
 		Just s -> processIcmp icmp s now m
 	where sess = Map.lookup (icmpId icmp) m
 -- new block, add to map and send ping
-processEvent (AddBlock id peer bytes) now m = 
+processEvent (AddBlock id peer bytes) now m =
 		(map2, Just $ echoRequest peer id (pingSeqNo sess) bytes)
-	where 
+	where
 	sess = PingSession 1 peer now
 	map2 = Map.insert id sess m
 
@@ -115,7 +115,7 @@ writeBlock (PingHandle fs _ _ n) b off m mm name (File len mode actBlocks) = do
 	putStrLn $ "write to file " ++ name ++ " at " ++ show off ++ " data " ++ show b
 	return $ Right . fromIntegral $ BL.length payload
 
-fileStat ctx etype link len mode = FileStat { 
+fileStat ctx etype link len mode = FileStat {
 	statEntryType = etype, statFileMode = mode,
 	statLinkCount = link, statFileOwner = fuseCtxUserID ctx,
 	statFileGroup = fuseCtxGroupID ctx, statSpecialDeviceID = 0,
@@ -158,7 +158,7 @@ pingReadDir :: FsState -> FilePath -> IO (Either Errno [(FilePath, FileStat)])
 pingReadDir fs "/" = do
 	ctx <- getFuseContext
 	m <- readIORef $ fsmap fs
-	return $ Right $ map (dir ctx) [".",".."] ++ map (listFile ctx) (Map.toList m) 
+	return $ Right $ map (dir ctx) [".",".."] ++ map (listFile ctx) (Map.toList m)
 	where 	listFile ctx (a,File len mode _) = (a, fileStat ctx RegularFile 1 len mode)
 		dir ctx x = (x, dirStat ctx)
 pingReadDir _ _ = return $ Left eNOENT
@@ -181,7 +181,7 @@ pingRenameFile fs ('/':from) ('/':to) = updateMapIfFound fs from
 pingOpenFile :: FsState -> FilePath -> OpenMode -> OpenFileFlags -> IO (Either Errno PingHandle)
 pingOpenFile fs ('/':n) mode flags = lookupFile fs n openFile (Left eNOENT)
 	where openFile m mm name a = return $ Right $ PingHandle fs name mode $ pos a flags
-		where pos (File len mode _) f 
+		where pos (File len mode _) f
 			| append f = len
 			| otherwise = 0
 
@@ -224,7 +224,7 @@ parseArgs = do
 main :: IO ()
 main = do
 	(hosts,mpoint) <- parseArgs
-	checkNotEmpty hosts "Need at least one host!" 
+	checkNotEmpty hosts "Need at least one host!"
 	pingChan <- newChan
 	icmpSock <- openIcmpSocket
 	let state = (icmpSock, pingChan)

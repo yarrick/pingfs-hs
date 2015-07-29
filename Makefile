@@ -1,4 +1,5 @@
 # You need the network library: install with `cabal install network`
+# You need the HFuse library: install with `cabal install hfuse`
 .PHONY = all run clean
 
 all: pingfs
